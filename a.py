@@ -5,7 +5,7 @@ import time
 
 # Define a simple 1x1x3 kernel for RGB
 kernel = np.array([[0.8, 0.9, 0.8], 
-                   [0.9, 1, 0.9], 
+                   [0.9, 1.7, 0.9], 
                    [0.8, 0.9, 0.8]])
 
 [training_set_inputs, training_set_outputs],[x_test, y_test] = cifar10.load_data()
