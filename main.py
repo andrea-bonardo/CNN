@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image as im
 from keras.datasets import cifar10
 import random
-import time
+import matplotlib.pyplot as plt
 
 class NeuronLayer():
     def __init__(self, numero_prec, numero_di_kernel, profondita):
@@ -37,7 +37,6 @@ class dense_layer():
         self.bias = np.loadtxt("weight.txt", dtype=float, skiprows=input)
 
 
-
 class CNN():
     def __init__(self, layer1, layer2, layer3, layer4, fc_layer):
         self.layer1 = layer1
@@ -46,18 +45,21 @@ class CNN():
         self.layer4 = layer4
         self.fc_layer = fc_layer
 
+    def __relu(self, x):
+        return np.where(x > 0, x, x * 0.01)
+
+    def __relu_derivative(self, x):
+        return np.where(x > 0, 1, -0.01)
+    
     def convolution(self, kernel, input_region):
         return np.sum(np.multiply(kernel, input_region))
 
     def convol_layer(self, image, kernel):
         input_channels, height, width = image.shape
-        output_height = height - 2
-        output_width = width - 2
-        output = np.zeros((output_height, output_width))
-        for i in range(output_height):
-            for j in range(output_width):
-                patch = image[:, i:i+3, j:j+3]
-                output[i, j] = self.convolution(kernel, patch)
+        output = np.zeros((height-2, width-2))
+        for i in range(height-2):
+            for j in range(width-2):
+                output[i,j] = self.convolution(kernel, image[:, i:i+3, j:j+3])
         return output
 
     def max_pooling(self, image, size):
@@ -65,87 +67,203 @@ class CNN():
         pooled_height = height // size
         pooled_width = width // size
         pooled = np.zeros((channels, pooled_height, pooled_width))
+        indices = [[[(0,0)] * pooled_width for _ in range(pooled_height)] for _ in range(channels)]
         for c in range(channels):
             for i in range(0, height, size):
                 for j in range(0, width, size):
-                    pooled[c, i//size, j//size] = np.max(image[c, i:i+size, j:j+size])
-        return pooled
+                    patch = image[c, i:i+size, j:j+size]
+                    max_val = np.max(patch)
+                    pooled[c, i//size, j//size] = max_val
+                    max_idx = np.argmax(patch)
+                    offset_i, offset_j = np.unravel_index(max_idx, patch.shape)
+                    indices[c][i//size][j//size] = (i + offset_i, j + offset_j)
+        return pooled, indices
     
     def __softmax(self, x):
         exp = np.exp(x - np.max(x))  
-        return exp / exp.sum(axis=0)
+        return exp / exp.sum() + 1e-8
+
+    def backprop(self, y, learning_rate):
+        # Calcolo del gradiente della loss
+        d_loss = self.probabilities - y
+        d_fc_w = np.outer(self.flattened, d_loss)
+        d_fc_b = d_loss
+
+        #DENSE LAYER
+        d_pool4 = np.dot(self.fc_layer.synaptic_weights, d_loss).reshape(self.conv4.shape)
+
+
+        #CONV LAYER 4
+        d_conv4_prepool = np.zeros_like(self.conv4pre)
+        for c in range(d_conv4_prepool.shape[0]):
+            for i in range(self.conv4.shape[1]):
+                for j in range(self.conv4.shape[2]):
+                    orig_i, orig_j = self.pool4_idx[c][i][j]
+                    d_conv4_prepool[c, orig_i, orig_j] = d_pool4[c, i, j]
+        d_conv4_prepool *= self.__relu_derivative(self.conv4pre)
+        d_layer4 = [np.zeros_like(k) for k in self.layer4]
+        for k in range(len(self.layer4)):
+            for i in range(self.conv3.shape[1] - 2):
+                for j in range(self.conv3.shape[2] - 2):
+                    d_layer4[k] += d_conv4_prepool[k, i, j] * self.conv3[:, i:i+3, j:j+3]
+            self.layer4.kernel[k] -= learning_rate * d_layer4[k] / self.conv3.shape[0]
+
     
 
 
+        #CONV LAYER 3
+        d_conv3 = np.zeros_like(self.conv3)
+        for k in range(len(self.layer4)):
+            kernel = self.layer4[k]
+            for i in range(d_conv4_prepool.shape[1]):
+                for j in range(d_conv4_prepool.shape[2]):
+                    d_conv3[:, i:i+3, j:j+3] += kernel * d_conv4_prepool[k, i, j]
+        d_conv3 *= self.__relu_derivative(self.conv3)
+        d_layer3 = [np.zeros_like(k) for k in self.layer3]
+        for k in range(len(self.layer3)):
+            for i in range(self.conv2.shape[1] - 2):
+                for j in range(self.conv2.shape[2] - 2):
+                    d_layer3[k] += d_conv3[k, i, j] * self.conv2[:, i:i+3, j:j+3]
+            self.layer3.kernel[k] -= learning_rate * d_layer3[k] / self.conv2.shape[0]
 
 
 
+        #CONV LAYER 2
+        d_conv2_postpool = np.zeros_like(self.conv2)  # Shape: come output del pooling, es. (64, 14, 14)
+        for k in range(len(self.layer3)):
+            kernel = self.layer3[k]
+            for i in range(d_conv3.shape[1]):
+                for j in range(d_conv3.shape[2]):
+                    d_conv2_postpool[:, i:i+3, j:j+3] += kernel * d_conv3[k, i, j]
+
+        clip_value = 10.0
+        d_conv2_postpool = np.clip(d_conv2_postpool, -clip_value, clip_value)
+        d_conv2_prepool = np.zeros_like(self.conv2pre)  # Shape: es. (64, 28, 28)
+        for c in range(self.conv2pre.shape[0]):
+            for i in range(self.conv2.shape[1]):  
+                for j in range(self.conv2.shape[2]):
+                    orig_i, orig_j = self.conv2_idx[c][i][j]
+                    d_conv2_prepool[c, orig_i, orig_j] = d_conv2_postpool[c, i, j]
+
+        d_layer2 = [np.zeros_like(k) for k in self.layer2]
+        d_conv = np.zeros_like(self.conv)
+        for k in range(len(self.layer2)):
+            kernel = self.layer2[k]
+            for i in range(d_conv2_prepool.shape[1]):
+                for j in range(d_conv2_prepool.shape[2]):
+                    patch = self.conv[:, i:i+3, j:j+3]
+                    grad_val = d_conv2_prepool[k, i, j]
+                    d_layer2[k] += grad_val * patch
+            d_layer2[k] = np.clip(d_layer2[k], -clip_value, clip_value)
+            self.layer2.kernel[k] -= learning_rate * d_layer2[k] / self.conv.shape[0]
+        d_conv *= self.__relu_derivative(self.conv)
+
+
+        #CONV LAYER 1
+        d_layer1 = [np.zeros_like(k) for k in self.layer1]
+        for k in range(len(self.layer1)):
+            for i in range(self.input.shape[1] - 2):
+                for j in range(self.input.shape[2] - 2):
+                    d_layer1[k] += d_conv[k, i, j] * self.input[:, i:i+3, j:j+3]
+            self.layer1.kernel[k] -= learning_rate * d_layer1[k]
+
+        self.fc_layer.synaptic_weights -= learning_rate * d_fc_w
+        self.fc_layer.bias -= learning_rate * d_fc_b
+
+
+    def train(self, training_set_inputs, training_set_outputs, loss_graph, epochs=10, learning_rate=0.001, batch_size=32):
+        for epoch in range(epochs):
+            for i in range(0, len(training_set_inputs), batch_size):
+                batch_X = training_set_inputs[i:i+batch_size]
+                batch_y = training_set_outputs[i:i+batch_size]
+                
+                batch_loss = 0
+                cont=0
+                for x, y in zip(batch_X, batch_y):
+                    # Forward pass
+                    prob = self.think(x)
+                    
+                    # Calculate loss
+                    loss = -np.log(prob[np.argmax(y)])
+                    batch_loss += loss
+                    
+                    # Backpropagation
+                    self.backprop(y, learning_rate)
+                    print(f"{epoch/epochs*100  + (i/(len(training_set_inputs)/batch_size))*100/epochs +  (cont/32)*(batch_size/len(training_set_inputs))}%")
+                    cont+=1
+                loss_graph = np.append(loss_graph, batch_loss / len(batch_X))
+
+                
     def think(self, image):
-        image = np.transpose(image, (2, 0, 1))  # Shape: (3, 32, 32)
-        print("Input shape:", image.shape)
+        self.input = np.transpose(image, (2, 0, 1))  # Shape: (3, 32, 32)
 
         # Layer 1
-        conv = []
+        self.conv = []
         for kernel in self.layer1:
-            conv.append(self.convol_layer(image, kernel))
-        conv = np.array(conv)  # Shape: (32, 30, 30)
-        print("After Layer1:", conv.shape)
+            self.conv.append(self.convol_layer(self.input, kernel))
+        self.conv = np.array(self.conv)  # Shape: (32, 30, 30)
+        self.conv = self.__relu(self.conv)
 
         # Layer 2
-        conv2 = []
+        self.conv2 = []
         for kernel in self.layer2:
-            conv2.append(self.convol_layer(conv, kernel))
-        conv2 = np.array(conv2)  # Shape: (64, 28, 28)
-        print("After Layer2:", conv2.shape)
+            self.conv2.append(self.convol_layer(self.conv, kernel))
+        self.conv2 = np.array(self.conv2)  # Shape: (64, 28, 28)
+        self.conv2pre = self.__relu(self.conv2)
 
         # Max Pooling
-        conv2 = self.max_pooling(conv2, 2)  # Shape: (64, 14, 14)
-        print("After Pooling1:", conv2.shape)
+        self.conv2, self.conv2_idx = self.max_pooling(self.conv2pre, 2)  # Shape: (64, 14, 14)
 
         # Layer 3
-        conv3 = []
+        self.conv3 = []
         for kernel in self.layer3:
-            conv3.append(self.convol_layer(conv2, kernel))
-        conv3 = np.array(conv3)  # Shape: (128, 12, 12)
-        print("After Layer3:", conv3.shape)
+            self.conv3.append(self.convol_layer(self.conv2, kernel))
+        self.conv3 = np.array(self.conv3)  # Shape: (128, 12, 12)
+        self.conv3 = self.__relu(self.conv3)
 
         # Layer 4
-        conv4 = []
+        self.conv4 = []
         for kernel in self.layer4:
-            conv4.append(self.convol_layer(conv3, kernel))
-        conv4 = np.array(conv4)  # Shape: (256, 10, 10)
-        print("After Layer4:", conv4.shape)
+            self.conv4.append(self.convol_layer(self.conv3, kernel))
+        self.conv4 = np.array(self.conv4)  # Shape: (256, 10, 10)
+        self.conv4pre = self.__relu(self.conv4)
 
         # Max Pooling
-        conv4 = self.max_pooling(conv4, 2)  # Shape: (256, 5, 5)
-        print("After Pooling2:", conv4.shape)
+        self.conv4, self.pool4_idx = self.max_pooling(self.conv4pre, 2)  # Shape: (256, 5, 5)
 
 
-        flattened = conv4.flatten()
-        print("Flattened shape:", flattened.shape)  # Should be (6400,)
+        self.flattened = self.conv4.flatten()  # Shape (6400,)
 
-        output = np.dot(flattened, self.fc_layer.synaptic_weights) + self.fc_layer.bias
-        print(output.shape)  
+        output = np.dot(self.flattened, self.fc_layer.synaptic_weights) + self.fc_layer.bias
 
-
-        probabilities = self.__softmax(output)
-        return probabilities
+        self.probabilities = self.__softmax(output)
+        return self.probabilities
 
 
 if __name__ == "__main__":
-    # Initialize layers with correct numero_prec (cumulative kernels from previous layers)
     layer1 = NeuronLayer(0, 32, 3)          # 32 kernels, depth=3 (RGB)
     layer2 = NeuronLayer(32, 64, 32)        # 64 kernels, depth=32 (output from layer1)
     layer3 = NeuronLayer(32+64, 128, 64)    # 128 kernels, depth=64 (output from layer2)
     layer4 = NeuronLayer(32+64+128, 256, 128) # 256 kernels, depth=128 (output from layer3)
     fc_layer = dense_layer(6400, 10)     # 10 output neurons
 
-    print(fc_layer.synaptic_weights.shape)
-    print(fc_layer.bias.shape)
-
-    (_, _), (x_test, _) = cifar10.load_data()
-    image = x_test[0]  # Shape: (32, 32, 3)
-
     cnn = CNN(layer1, layer2, layer3, layer4, fc_layer)
+
+    [training_set_inputs, training_set_outputs],[x_test, y_test] = cifar10.load_data()
+
+    training_set_inputs = np.array(training_set_inputs)
+    training_set_inputs = training_set_inputs.astype(np.float32) / 255.0
+
+    training_set_outputs = np.eye(10)[training_set_outputs.flatten()]
+
+    loss=np.array([])
+    cnn.train(training_set_inputs, training_set_outputs, loss, epochs=6, learning_rate=0.001, batch_size=32)
+
+    plt.plot(loss)
+
+    image = x_test[0]  
+    
     output = cnn.think(image)
-    print(output)
+
+    for i in range(10):
+        print(f"{i}: {output[i]:.4f}")
