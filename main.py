@@ -189,7 +189,7 @@ class CNN():
                     
                     # Backpropagation
                     self.backprop(y, learning_rate)
-                    print(f"{epoch/epochs*100  + (i/(len(training_set_inputs)/batch_size))*100/epochs +  (cont/32)*(batch_size/len(training_set_inputs))}%")
+                    print(f"{epoch/epochs*100  + (i/(len(training_set_inputs)/batch_size))*100/epochs +  (cont/32)*(batch_size/len(training_set_inputs))*100/epochs}%")
                     cont+=1
                 loss_graph = np.append(loss_graph, batch_loss / len(batch_X))
 
