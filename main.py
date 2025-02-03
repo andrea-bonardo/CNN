@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image as im
 from keras.datasets import cifar10
 import random
+import time
 import matplotlib.pyplot as plt
 
 class NeuronLayer():
@@ -172,11 +173,12 @@ class CNN():
 
 
     def train(self, training_set_inputs, training_set_outputs, loss_graph, epochs=10, learning_rate=0.001, batch_size=32):
+        start = time.time()
+        mancante= np.inf
         for epoch in range(epochs):
             for i in range(0, len(training_set_inputs), batch_size):
                 batch_X = training_set_inputs[i:i+batch_size]
                 batch_y = training_set_outputs[i:i+batch_size]
-                
                 batch_loss = 0
                 cont=0
                 for x, y in zip(batch_X, batch_y):
@@ -189,10 +191,12 @@ class CNN():
                     
                     # Backpropagation
                     self.backprop(y, learning_rate)
-                    print(f"{epoch/epochs*100  + (i/(len(training_set_inputs)/batch_size))*100/epochs +  (cont/32)*(batch_size/len(training_set_inputs))*100/epochs}%")
+                    percentuale=epoch/epochs*100  + (i/len(training_set_inputs))*(100/epochs) +  (cont/32)*(batch_size/len(training_set_inputs))*(100/epochs)
+                    print(f"{percentuale:.5f}% t rimanente {time.strftime("%H:%M:%S", mancante)}")
                     cont+=1
                 loss_graph = np.append(loss_graph, batch_loss / len(batch_X))
-
+                passato = time.time() - start
+                mancante = passato / percentuale * (100-percentuale)
                 
     def think(self, image):
         self.input = np.transpose(image, (2, 0, 1))  # Shape: (3, 32, 32)
