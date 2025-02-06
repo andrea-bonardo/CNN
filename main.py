@@ -1,5 +1,4 @@
 import numpy as np
-from PIL import Image as im
 from keras.datasets import cifar10
 import random
 import time
@@ -172,16 +171,21 @@ class CNN():
         self.fc_layer.bias -= learning_rate * d_fc_b
 
 
-    def train(self, training_set_inputs, training_set_outputs, loss_graph, epochs=6, learning_rate=0.001, batch_size=32):
+    def train(self, training_set_inputs, training_set_outputs, loss_graph, epochs=1, learning_rate=0.001, batch_size=32):
         start = time.time()
         mancante= 0
+        temp = time.strftime("%H:%M:%S", time.gmtime(mancante))
+        total_batches = len(training_set_inputs) // batch_size
+        total_steps = epochs * total_batches * batch_size
+        cont=0
+            
         for epoch in range(epochs):
             for i in range(0, len(training_set_inputs), batch_size):
                 batch_X = training_set_inputs[i:i+batch_size]
                 batch_y = training_set_outputs[i:i+batch_size]
                 batch_loss = 0
-                temp=time.strftime('%H:%M:%S', time.gmtime(mancante))
-                cont=0
+                
+                
                 for x, y in zip(batch_X, batch_y):
                     # Forward pass
                     prob = self.think(x)
@@ -192,13 +196,16 @@ class CNN():
                     
                     # Backpropagation
                     self.backprop(y, learning_rate)
-                    percentuale=epoch/epochs*100  + (i/len(training_set_inputs))*(100/epochs) +  (cont/32)*(batch_size/len(training_set_inputs))*(100/epochs)
+                    percentuale = (cont/total_steps)*100
                     print(f"{percentuale:.5f}%      t-rimanente:{temp}")
                     cont+=1
+
                 loss_graph = np.append(loss_graph, batch_loss / len(batch_X))
                 passato = time.time() - start
                 mancante = passato / percentuale * (100-percentuale)
+                temp = time.strftime("%D%H:%M:%S", time.gmtime(mancante))
                 
+
                 
     def think(self, image):
         self.input = np.transpose(image, (2, 0, 1))  # Shape: (3, 32, 32)
@@ -257,19 +264,25 @@ if __name__ == "__main__":
 
     [training_set_inputs, training_set_outputs],[x_test, y_test] = cifar10.load_data()
 
-    training_set_inputs = np.array(training_set_inputs)
-    training_set_inputs = training_set_inputs.astype(np.float32) / 255.0
+    tr=input("training: ?")
+    if tr=="s":
 
-    training_set_outputs = np.eye(10)[training_set_outputs.flatten()]
+        training_set_inputs = np.array(training_set_inputs)
+        training_set_inputs = training_set_inputs.astype(np.float32) / 255.0
 
-    loss=np.array([])
-    cnn.train(training_set_inputs, training_set_outputs, loss, epochs=6, learning_rate=0.001, batch_size=32)
+        training_set_outputs = np.eye(10)[training_set_outputs.flatten()]
 
-    plt.plot(loss)
 
-    image = x_test[0]  
+        loss=np.array([])
+        cnn.train(training_set_inputs, training_set_outputs, loss, epochs=1, learning_rate=0.001, batch_size=32)
+
+        plt.plot(loss)
+
+    percentuale={range(10):[0,0]}
+    for i in range(len(x_test)):
+        percentuale[y_test[i]][0]+=1
+        percentuale[y_test[i]][1] = percentuale[y_test[i]][1]+1 if y_test[i]==cnn.think(x_test[1]) else percentuale[y_test[i]][1]
     
-    output = cnn.think(image)
-
+        
     for i in range(10):
-        print(f"{i}: {output[i]:.4f}")
+        print(f"{i}: {percentuale[i][1]/percentuale[i][0]:.4f}")
