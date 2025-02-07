@@ -278,11 +278,15 @@ if __name__ == "__main__":
 
         plt.plot(loss)
 
-    percentuale={range(10):[0,0]}
-    for i in range(len(x_test)):
-        percentuale[y_test[i]][0]+=1
-        percentuale[y_test[i]][1] = percentuale[y_test[i]][1]+1 if y_test[i]==cnn.think(x_test[1]) else percentuale[y_test[i]][1]
+
+    percentuale={}
+    for i in range(10):
+        percentuale[i]=[0,0]
+
+    for i in range(len(x_test[:1000])):
+        percentuale[int(y_test[i])][0]+=1
+        percentuale[int(y_test[i])][1] += 1 if y_test[i]==np.argmax(cnn.think(x_test[i])) else 0
     
         
     for i in range(10):
-        print(f"{i}: {percentuale[i][1]/percentuale[i][0]:.4f}")
+        print(f"{i}: {percentuale[i][1]/percentuale[i][0]*100:.4f}")
